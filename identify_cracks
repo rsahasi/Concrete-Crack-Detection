@@ -3,6 +3,7 @@
 
 PATH = '/Users/25ruhans/Desktop/K'
 
+
 def create_model(base_model, num_classes):
     import tensorflow as tf
     x=base_model.output
