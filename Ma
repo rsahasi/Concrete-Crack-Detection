@@ -1,1 +1,159 @@
+# @author Ruhan Sahasi
+# @version 5/29/23
+
+PATH = '/Users/25ruhans/Desktop/K'
+
+def create_model(base_model, num_classes):
+    import tensorflow as tf
+    x=base_model.output
+    x=GlobalAveragePooling2D()(x)
+    x=tf.keras.layers.Dense(100,activation='relu', kernel_initializer=tf.keras.initializers.VarianceScaling(), use_bias=True)(x)
+    preds=tf.keras.layers.Dense(num_classes,activation='softmax', kernel_initializer=tf.keras.initializers.VarianceScaling(), use_bias=False)(x)
+    model=Model(inputs=base_model.input,outputs=preds)
+    return model
+    
+def get_optimizer(optimizer_name, learning_rate):
+    from tensorflow.keras.optimizers import Adam, Adadelta, Adagrad, Adamax, Ftrl, Nadam, RMSprop, SGD
+    print('Selected Optimizer', optimizer_name)
+    switcher = {
+        'Adam': Adam(learning_rate=learning_rate),
+    }
+    return switcher.get(optimizer_name, Adam(learning_rate=learning_rate))
+
+
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import tensorflow as tf
+
+from keras.applications.resnet import preprocess_input
+from keras.preprocessing.image import ImageDataGenerator
+from keras.layers import Dense,GlobalAveragePooling2D
+from keras.models import Model
+from tensorflow.keras import regularizers
+
+from tensorflow.keras.preprocessing import image_dataset_from_directory
+from keras.callbacks import EarlyStopping
+from tensorflow import keras
+
+# Initialize hyper params
+epochs = 20
+base_learning_rate = 0.0001
+optimizer = 'Adam'
+BATCH_SIZE = 32
+IMG_SIZE = (224, 224)
+
+# Create the data generation pipeline for training and validation
+train_datagen = ImageDataGenerator(preprocessing_function=preprocess_input, validation_split=0.2)
+
+train_generator = train_datagen.flow_from_directory(PATH,
+                                                target_size=IMG_SIZE,
+                                                color_mode='rgb',
+                                                batch_size=BATCH_SIZE,
+                                                class_mode='categorical',
+                                                shuffle=True,
+                                                subset = 'training')
+validation_generator = train_datagen.flow_from_directory(PATH,
+                                                target_size=IMG_SIZE,
+                                                color_mode='rgb',
+                                                batch_size=BATCH_SIZE,
+                                                class_mode='categorical',
+                                                shuffle=True,
+                                                subset = 'validation')
+
+base_model = tf.keras.applications.mobilenet_v2.MobileNetV2(input_shape=(224, 224, 3), include_top=False, weights='imagenet', alpha=0.35)
+for layer in base_model.layers:
+    layer.trainable=False
+
+# Specify the number of classes
+num_classes = 2
+# Create the base model
+model = create_model(base_model,num_classes)
+print(len(base_model.layers))
+
+model.compile(optimizer = get_optimizer(optimizer_name=optimizer,learning_rate=base_learning_rate),loss='CategoricalCrossentropy',metrics=['accuracy'])
+
+early_stopping_monitor = EarlyStopping(
+    monitor='val_loss',
+    min_delta=0,
+    patience=30,
+    verbose=0,
+    mode='auto',
+    baseline=None,
+    restore_best_weights=True
+)
+
+step_size_train = train_generator.n//train_generator.batch_size
+history_fine = model.fit(train_generator,
+                        epochs=epochs,
+                        callbacks=[early_stopping_monitor],
+                        validation_data = validation_generator,
+                        verbose=1)
+
+# Import numpy for calculating best model accuracy
+import numpy as np
+# Populating matrics -> accuracy & loss
+acc = history_fine.history['accuracy']
+val_acc = history_fine.history['val_accuracy']
+
+loss = history_fine.history['loss']
+val_loss = history_fine.history['val_loss']
+
+print('Training Accuracy: ', acc)
+print('Validation Accuracy: ', val_acc)
+print('Training Loss: ', loss)
+print('Validation Loss: ', val_loss)
+best_model_accuracy = history_fine.history['val_accuracy'][np.argmin(history_fine.history['val_loss'])]
+print('best model accuracy: ', best_model_accuracy)
+def seperate_labels(generator):
+    x_validation = []
+    y_validation = []
+    num_seen = 0
+
+    for x, labels in generator:
+        x_validation.append(x)
+        y_validation.append([argmax(label) for label in labels])
+        num_seen += len(x)
+        if num_seen == generator.n: break
+
+    x_validation = np.concatenate(x_validation)
+    y_validation = np.concatenate(y_validation)
+    return x_validation, y_validation
+
+# Calculate and display the confusion matrix
+import matplotlib.pyplot as plt
+from numpy.core.fromnumeric import argmax
+from sklearn.metrics import ConfusionMatrixDisplay
+
+x_validation, y_validation = seperate_labels(validation_generator)
+y_pred = model.predict(x_validation, batch_size=BATCH_SIZE)
+predictions = np.apply_along_axis(argmax, 1, y_pred)
+display_labels = validation_generator.class_indices.keys()
+
+ConfusionMatrixDisplay.from_predictions(y_validation, predictions, display_labels=display_labels, cmap="binary")
+plt.show()
+
+# Predicting code for an image
+from tensorflow.keras.preprocessing import image
+img_path = '/Users/25ruhans/Desktop/archive/00738.jpg'
+img = image.load_img(img_path, target_size=IMG_SIZE)
+img_array = image.img_to_array(img)
+img_batch = np.expand_dims(img_array, axis=0)
+img_preprocessed = preprocess_input(img_batch)
+prediction = model.predict(img_preprocessed)
+print(prediction)
+
+from sklearn.metrics import roc_curve, roc_auc_score
+
+predictions = y_pred[:, 1]
+y_true = validation_generator.classes
+fpr, tpr, _ = roc_curve(y_true, predictions)
+auc = roc_auc_score(y_true, predictions)
+
+#create ROC curve
+plt.plot(fpr,tpr,label="AUC="+str(auc))
+plt.ylabel('True Positive Rate')
+plt.xlabel('False Positive Rate')
+plt.legend(bbox_to_anchor=(1, 1.12))
+plt.show()
 
